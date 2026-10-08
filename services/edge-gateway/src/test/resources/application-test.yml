@@ -1,0 +1,17 @@
+payflow:
+  gateway:
+    # Overridden in tests via DynamicPropertySource to WireMock's ports
+    merchant-uri: http://127.0.0.1:0
+    payment-uri: http://127.0.0.1:0
+    rate-limit:
+      enabled: false
+  security:
+    pepper:
+      current-version: 1
+      values:
+        # Same 32-byte test pepper as merchant-service — never use in production
+        1: YWJjZGVmZ2hpamsrbG1ub3BxcnN0dXZ3eHl6QUJDREVG
+
+springdoc:
+  api-docs:
+    enabled: false

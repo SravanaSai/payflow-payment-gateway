@@ -1,0 +1,25 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:merchant;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: none
+
+  flyway:
+    enabled: false
+
+  h2:
+    console:
+      enabled: false
+
+payflow:
+  security:
+    pepper:
+      current-version: 1
+      values:
+        # 32-byte test pepper (abcdefghijklmnopqrstuvwxyzABCDEF) — never use in production
+        1: YWJjZGVmZ2hpamsrbG1ub3BxcnN0dXZ3eHl6QUJDREVG

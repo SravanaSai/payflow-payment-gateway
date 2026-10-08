@@ -1,0 +1,18 @@
+# Maven build output — regenerated on every build, never commit
+target/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# macOS
+.DS_Store
+
+# Secrets (used in later phases)
+.env
+*.env.local
+.payflow-pepper
+
+# Logs
+*.log

@@ -1,0 +1,52 @@
+spring:
+  application:
+    name: merchant-service
+
+  datasource:
+    url: jdbc:postgresql://localhost:5433/merchant
+    username: payflow
+    password: payflow
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: false
+
+server:
+  port: 8081
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+
+payflow:
+  openapi:
+    title: PayFlow Merchant API
+    description: Merchant onboarding service
+    version: v1
+  security:
+    pepper:
+      current-version: 1
+      values:
+        1: ${PAYFLOW_API_KEY_PEPPER}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+
+logging:
+  level:
+    root: INFO
+    com.payflow: DEBUG

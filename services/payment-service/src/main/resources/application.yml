@@ -1,0 +1,67 @@
+spring:
+  application:
+    name: payment-service
+
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5433}/payment
+    username: ${POSTGRES_USER:payflow}
+    password: ${POSTGRES_PASSWORD:payflow}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: false
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 200ms
+      connect-timeout: 200ms
+
+server:
+  port: 8082
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  # The idempotency cache fails open, so a Redis outage must not mark payment-service unhealthy.
+  health:
+    redis:
+      enabled: false
+
+payflow:
+  openapi:
+    title: PayFlow Payment API
+    description: Payment lifecycle — create, authorize, capture, cancel
+    version: v1
+  idempotency:
+    ttl: 24h
+    max-body-bytes: 65536
+    cache:
+      enabled: true
+      ttl: 10m
+    purge:
+      interval: 15m
+      batch-size: 1000
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+
+logging:
+  level:
+    root: INFO
+    com.payflow: DEBUG

@@ -1,0 +1,190 @@
+# PayFlow local infrastructure — Phase 0 Step 3
+#
+# Start:  docker compose -f deploy/docker-compose/infra.yml up -d
+# Stop:   docker compose -f deploy/docker-compose/infra.yml down
+# Reset:  docker compose -f deploy/docker-compose/infra.yml down -v  (wipes DB data)
+#
+# Copy .env.example to .env if you need custom ports.
+
+name: payflow
+
+services:
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — database-per-service pattern (one DB per microservice)
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: payflow-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-payflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-payflow}
+      POSTGRES_DB: postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    networks:
+      - payflow-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-payflow} -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Redis — rate limiting (Phase 1), idempotency cache (Phase 2), velocity (Phase 8)
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: payflow-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - payflow-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Kafka (KRaft) — event bus for outbox, webhooks, ledger (Phase 4+)
+  # Dual listeners: localhost:9092 for host apps, kafka:29092 for containers
+  # ---------------------------------------------------------------------------
+  kafka:
+    image: apache/kafka:3.8.0
+    container_name: payflow-kafka
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
+    ports:
+      - "${KAFKA_HOST_PORT:-9092}:9092"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    networks:
+      - payflow-net
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # Kafka UI — browse topics. Host port defaults to 8090 so the edge gateway
+  # can own 8080. Container still listens on 8080 internally.
+  # ---------------------------------------------------------------------------
+  kafka-ui:
+    image: provectuslabs/kafka-ui:v0.7.2
+    container_name: payflow-kafka-ui
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_CLUSTERS_0_NAME: payflow-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      DYNAMIC_CONFIG_ENABLED: "true"
+    ports:
+      - "${KAFKA_UI_PORT:-8090}:8080"
+    networks:
+      - payflow-net
+
+  # ---------------------------------------------------------------------------
+  # Jaeger — distributed tracing (full wiring in Phase 10)
+  # ---------------------------------------------------------------------------
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    container_name: payflow-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "${JAEGER_UI_PORT:-16686}:16686"
+      - "${OTLP_GRPC_PORT:-4317}:4317"
+      - "${OTLP_HTTP_PORT:-4318}:4318"
+    networks:
+      - payflow-net
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:16686"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Prometheus — scrapes /actuator/prometheus from services (Phase 10 dashboards)
+  # ---------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    container_name: payflow-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - payflow-net
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  # ---------------------------------------------------------------------------
+  # Grafana — visualizes Prometheus metrics (pre-provisioned datasource)
+  # ---------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: payflow-grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - payflow-net
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+networks:
+  payflow-net:
+    name: payflow-net
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:
+  prometheus_data:
+  grafana_data:

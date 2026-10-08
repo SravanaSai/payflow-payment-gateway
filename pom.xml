@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+         https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.payflow</groupId>
+    <artifactId>payment-gateway</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+    <packaging>pom</packaging>
+    <name>PayFlow Payment Gateway</name>
+    <description>Distributed payment gateway — multi-module Maven monorepo</description>
+
+    <!--
+      Module list: Maven builds these in order when you run `mvn clean install`.
+      Step 2 only includes the BOM and common-core; services come in Step 4.
+    -->
+    <modules>
+        <module>platform-bom</module>
+        <module>libs/common-core</module>
+        <module>libs/common-security</module>
+        <module>libs/common-web</module>
+        <module>services/merchant-service</module>
+        <module>services/payment-service</module>
+        <module>services/edge-gateway</module>
+    </modules>
+
+    <properties>
+        <java.version>21</java.version>
+        <maven.compiler.release>${java.version}</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <spring-boot.version>4.0.7</spring-boot.version>
+    </properties>
+
+    <!--
+      Import our platform BOM so every child module inherits the same
+      dependency versions (Spring Boot, Spring Cloud, internal libs).
+    -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>com.payflow</groupId>
+                <artifactId>platform-bom</artifactId>
+                <version>${project.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.13.0</version>
+                    <configuration>
+                        <release>${java.version}</release>
+                    </configuration>
+                </plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.5.2</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
+</project>

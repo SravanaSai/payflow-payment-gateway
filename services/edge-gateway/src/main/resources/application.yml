@@ -1,0 +1,84 @@
+spring:
+  application:
+    name: edge-gateway
+
+  threads:
+    virtual:
+      enabled: true
+
+  http:
+    clients:
+      connect-timeout: 2s
+      read-timeout: 5s
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 200ms
+
+  cloud:
+    gateway:
+      server:
+        webmvc:
+          routes:
+            - id: merchant-service
+              uri: ${payflow.gateway.merchant-uri}
+              predicates:
+                - Path=/v1/merchants/**
+            - id: payment-service
+              uri: ${payflow.gateway.payment-uri}
+              predicates:
+                - Path=/v1/payments/**
+
+server:
+  port: 8080
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when_authorized
+  # Rate limiting fails open (ADR-0003), so a Redis outage must not mark the gateway unhealthy.
+  health:
+    redis:
+      enabled: false
+
+payflow:
+  gateway:
+    merchant-uri: http://localhost:8081
+    payment-uri: http://localhost:8082
+    rate-limit:
+      enabled: true
+      trust-forwarded-for: false
+      anonymous:
+        capacity: 100
+        refill-per-second: 20
+      live:
+        capacity: 100
+        refill-per-second: 50
+      test:
+        capacity: 20
+        refill-per-second: 10
+  security:
+    pepper:
+      current-version: 1
+      values:
+        1: ${PAYFLOW_API_KEY_PEPPER}
+  openapi:
+    title: PayFlow Edge Gateway
+    description: Public reverse proxy — not a documented API surface
+    version: v1
+
+springdoc:
+  api-docs:
+    enabled: false
+
+logging:
+  level:
+    root: INFO
+    com.payflow: DEBUG
+    org.springframework.cloud.gateway: INFO
