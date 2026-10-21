@@ -2,6 +2,8 @@ package com.payflow.payment.idempotency;
 
 import com.payflow.payment.idempotency.IdempotencyRecord.Status;
 import com.payflow.payment.idempotency.IdempotencyRecord.StoredResponse;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
@@ -20,6 +22,8 @@ import java.util.Optional;
  */
 final class CachingIdempotencyStore implements IdempotencyStore {
 
+    static final String BREAKER = "idempotency-cache";
+
     // Bump the version when the cached shape changes; entries in the old shape then just expire.
     private static final String KEY_PREFIX = "idem:v1:";
 
@@ -30,9 +34,11 @@ final class CachingIdempotencyStore implements IdempotencyStore {
     private final JsonMapper json;
     private final Clock clock;
     private final Duration maxTtl;
+    private final CircuitBreaker breaker;
     private final Counter hits;
     private final Counter misses;
     private final Counter errors;
+    private final Counter skipped;
 
     CachingIdempotencyStore(
             IdempotencyStore delegate,
@@ -40,15 +46,18 @@ final class CachingIdempotencyStore implements IdempotencyStore {
             JsonMapper json,
             Clock clock,
             Duration maxTtl,
+            CircuitBreaker breaker,
             MeterRegistry meters) {
         this.delegate = delegate;
         this.redis = redis;
         this.json = json;
         this.clock = clock;
         this.maxTtl = maxTtl;
+        this.breaker = breaker;
         this.hits = meters.counter("payflow.idempotency.cache", "result", "hit");
         this.misses = meters.counter("payflow.idempotency.cache", "result", "miss");
         this.errors = meters.counter("payflow.idempotency.cache", "result", "error");
+        this.skipped = meters.counter("payflow.idempotency.cache", "result", "skipped");
     }
 
     // A cached record is COMPLETED and unexpired, so the key is held: exactly what Postgres would answer.
@@ -81,11 +90,25 @@ final class CachingIdempotencyStore implements IdempotencyStore {
     }
 
     private Optional<IdempotencyRecord> read(IdempotencyKey key) {
+        String raw;
         try {
-            String value = redis.opsForValue().get(redisKey(key));
-            return value == null ? Optional.empty() : Optional.of(json.readValue(value, IdempotencyRecord.class));
+            raw = breaker.executeSupplier(() -> redis.opsForValue().get(redisKey(key)));
+        } catch (CallNotPermittedException ex) {
+            skipped.increment();
+            return Optional.empty();
         } catch (RuntimeException ex) {
             degraded("read", key, ex);
+            return Optional.empty();
+        }
+        if (raw == null) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(json.readValue(raw, IdempotencyRecord.class));
+        } catch (RuntimeException ex) {
+            errors.increment();
+            log.warn("Idempotency cache parse failed for {} {}; falling back to Postgres: {}",
+                    IdempotencyFilter.KEY_HEADER, key.value(), ex.toString());
             return Optional.empty();
         }
     }
@@ -97,8 +120,21 @@ final class CachingIdempotencyStore implements IdempotencyStore {
         if (ttl.isNegative() || ttl.isZero()) {
             return;
         }
+        String payload;
         try {
-            redis.opsForValue().set(redisKey(key), json.writeValueAsString(record), ttl);
+            payload = json.writeValueAsString(record);
+        } catch (RuntimeException ex) {
+            errors.increment();
+            log.warn("Idempotency cache serialize failed for {} {}: {}",
+                    IdempotencyFilter.KEY_HEADER, key.value(), ex.toString());
+            return;
+        }
+        String finalPayload = payload;
+        Duration finalTtl = ttl;
+        try {
+            breaker.executeRunnable(() -> redis.opsForValue().set(redisKey(key), finalPayload, finalTtl));
+        } catch (CallNotPermittedException ex) {
+            skipped.increment();
         } catch (RuntimeException ex) {
             degraded("write", key, ex);
         }

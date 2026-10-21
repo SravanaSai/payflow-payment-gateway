@@ -76,6 +76,20 @@ class PayFlowExceptionHandlerTest {
     }
 
     @Test
+    void processorErrorIs502() throws Exception {
+        mockMvc.perform(get("/probe/processor-error"))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.errorCode").value("PROCESSOR_ERROR"));
+    }
+
+    @Test
+    void upstreamTimeoutIs504() throws Exception {
+        mockMvc.perform(get("/probe/upstream-timeout"))
+                .andExpect(status().isGatewayTimeout())
+                .andExpect(jsonPath("$.errorCode").value("UPSTREAM_TIMEOUT"));
+    }
+
+    @Test
     void genuinelyUnexpectedErrorIsStill500() throws Exception {
         mockMvc.perform(get("/probe/bug"))
                 .andExpect(status().isInternalServerError())
@@ -98,6 +112,16 @@ class PayFlowExceptionHandlerTest {
         @GetMapping("/probe/domain-error")
         String domainError() {
             throw new PayFlowException(ErrorCode.PAYMENT_NOT_FOUND);
+        }
+
+        @GetMapping("/probe/processor-error")
+        String processorError() {
+            throw new PayFlowException(ErrorCode.PROCESSOR_ERROR);
+        }
+
+        @GetMapping("/probe/upstream-timeout")
+        String upstreamTimeout() {
+            throw new PayFlowException(ErrorCode.UPSTREAM_TIMEOUT);
         }
 
         @GetMapping("/probe/bug")

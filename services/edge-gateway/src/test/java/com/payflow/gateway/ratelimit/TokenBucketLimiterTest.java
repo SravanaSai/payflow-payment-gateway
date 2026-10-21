@@ -1,5 +1,8 @@
 package com.payflow.gateway.ratelimit;
 
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -7,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.util.List;
@@ -17,8 +21,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import java.time.Duration;
+
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.payflow.gateway.RedisTestSupport;
@@ -117,11 +127,12 @@ class TokenBucketLimiterTest extends RedisTestSupport {
     @Test
     void failsOpenWhenRedisErrors() {
         StringRedisTemplate failingRedis = mock(StringRedisTemplate.class);
-        when(failingRedis.execute(any(), any(), any())).thenThrow(new RuntimeException("redis down"));
+        stubRedisExecuteThrows(failingRedis);
 
         DefaultRedisScript<List<Long>> script = mock(DefaultRedisScript.class);
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        TokenBucketLimiter failingLimiter = new TokenBucketLimiter(failingRedis, script, registry);
+        TokenBucketLimiter failingLimiter = new TokenBucketLimiter(
+                failingRedis, script, CircuitBreakerRegistry.ofDefaults(), registry);
 
         RateLimitPolicy policy = new RateLimitPolicy("test", 10, 1);
         RateLimitDecision decision = failingLimiter.tryConsume("rl:test:failopen", policy);
@@ -129,5 +140,41 @@ class TokenBucketLimiterTest extends RedisTestSupport {
         assertThat(decision.allowed()).isTrue();
         assertThat(decision.degraded()).isTrue();
         assertThat(registry.get("payflow.ratelimit.degraded").counter().count()).isEqualTo(1);
+        verify(failingRedis, times(1)).execute(any(RedisScript.class), anyList(), any(), any(), any(), any());
+    }
+
+    @Test
+    void repeatedRedisErrorsOpenTheBreakerAndSkipRedis() {
+        StringRedisTemplate failingRedis = mock(StringRedisTemplate.class);
+        stubRedisExecuteThrows(failingRedis);
+
+        @SuppressWarnings("unchecked")
+        DefaultRedisScript<List<Long>> script = mock(DefaultRedisScript.class);
+        CircuitBreakerConfig breakerConfig = CircuitBreakerConfig.custom()
+                .slidingWindowSize(4)
+                .minimumNumberOfCalls(4)
+                .waitDurationInOpenState(Duration.ofMillis(100))
+                .build();
+        CircuitBreakerRegistry breakerRegistry = CircuitBreakerRegistry.of(breakerConfig);
+        CircuitBreaker breaker = breakerRegistry.circuitBreaker(TokenBucketLimiter.BREAKER);
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        TokenBucketLimiter failingLimiter = new TokenBucketLimiter(failingRedis, script, breakerRegistry, registry);
+
+        RateLimitPolicy policy = new RateLimitPolicy("test", 10, 1);
+        for (int i = 0; i < 6; i++) {
+            RateLimitDecision decision = failingLimiter.tryConsume("rl:test:breaker", policy);
+            assertThat(decision.allowed()).isTrue();
+            assertThat(decision.degraded()).isTrue();
+        }
+
+        assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.OPEN);
+        verify(failingRedis, times(4)).execute(any(RedisScript.class), anyList(), any(), any(), any(), any());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void stubRedisExecuteThrows(StringRedisTemplate failingRedis) {
+        doThrow(new RuntimeException("redis down"))
+                .when(failingRedis)
+                .execute(any(RedisScript.class), anyList(), any(), any(), any(), any());
     }
 }

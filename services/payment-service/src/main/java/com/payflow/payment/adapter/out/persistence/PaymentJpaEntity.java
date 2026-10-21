@@ -54,6 +54,12 @@ class PaymentJpaEntity {
     @Column(name = "cancellation_reason", length = 255)
     private String cancellationReason;
 
+    @Column(name = "processor_reference", length = 128)
+    private String processorReference;
+
+    @Column(name = "capture_attempts", nullable = false)
+    private int captureAttempts;
+
     // Boxed on purpose: a null version tells Spring Data the row is new, so save()
     // issues a plain INSERT instead of a merge that first SELECTs a row that isn't there.
     @Version
@@ -81,6 +87,8 @@ class PaymentJpaEntity {
             String reference,
             String failureReason,
             String cancellationReason,
+            String processorReference,
+            int captureAttempts,
             Long version,
             Instant createdAt,
             Instant updatedAt) {
@@ -95,6 +103,8 @@ class PaymentJpaEntity {
         this.reference = reference;
         this.failureReason = failureReason;
         this.cancellationReason = cancellationReason;
+        this.processorReference = processorReference;
+        this.captureAttempts = captureAttempts;
         this.version = version;
         this.createdAt = createdAt;
         this.updatedAt = updatedAt;
@@ -142,6 +152,14 @@ class PaymentJpaEntity {
 
     String getCancellationReason() {
         return cancellationReason;
+    }
+
+    String getProcessorReference() {
+        return processorReference;
+    }
+
+    int getCaptureAttempts() {
+        return captureAttempts;
     }
 
     Long getVersion() {

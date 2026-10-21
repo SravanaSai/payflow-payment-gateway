@@ -5,6 +5,7 @@ import com.payflow.common.web.PayFlowHeaders;
 import com.payflow.payment.PostgresRedisTestSupport;
 import com.payflow.payment.domain.model.PaymentEnvironment;
 import com.payflow.payment.domain.model.PaymentOwner;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -40,7 +41,19 @@ class IdempotencyCacheIntegrationTest extends PostgresRedisTestSupport {
     @Autowired
     private MeterRegistry meters;
 
+    @Autowired
+    private CircuitBreakerRegistry circuitBreakerRegistry;
+
     private final PaymentOwner owner = new PaymentOwner(MerchantId.generate(), PaymentEnvironment.TEST);
+
+    @Test
+    void breakerUsesConfiguredSettings() {
+        var config = circuitBreakerRegistry.circuitBreaker(CachingIdempotencyStore.BREAKER).getCircuitBreakerConfig();
+        assertThat(config.getSlidingWindowSize()).isEqualTo(20);
+        assertThat(config.getMinimumNumberOfCalls()).isEqualTo(10);
+        assertThat(config.getWaitIntervalFunctionInOpenState().apply(1)).isEqualTo(Duration.ofSeconds(5).toMillis());
+        assertThat(config.getSlowCallDurationThreshold()).isEqualTo(Duration.ofMillis(100));
+    }
 
     @Test
     void retriesAfterTheFirstAreAnsweredFromRedis() throws Exception {

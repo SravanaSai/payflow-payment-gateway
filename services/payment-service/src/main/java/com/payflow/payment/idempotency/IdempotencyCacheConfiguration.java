@@ -1,7 +1,11 @@
 package com.payflow.payment.idempotency;
 
 import com.payflow.payment.config.IdempotencyProperties;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -19,6 +23,8 @@ import java.time.Clock;
 @ConditionalOnProperty(prefix = "payflow.idempotency.cache", name = "enabled", havingValue = "true", matchIfMissing = true)
 class IdempotencyCacheConfiguration {
 
+    private static final Logger log = LoggerFactory.getLogger(IdempotencyCacheConfiguration.class);
+
     @Bean
     @Primary
     IdempotencyStore cachingIdempotencyStore(
@@ -27,7 +33,13 @@ class IdempotencyCacheConfiguration {
             JsonMapper json,
             Clock clock,
             IdempotencyProperties properties,
+            CircuitBreakerRegistry circuitBreakerRegistry,
             MeterRegistry meters) {
-        return new CachingIdempotencyStore(postgres, redis, json, clock, properties.cache().ttl(), meters);
+        CircuitBreaker breaker = circuitBreakerRegistry.circuitBreaker(CachingIdempotencyStore.BREAKER);
+        breaker.getEventPublisher().onStateTransition(event -> log.warn(
+                "Idempotency cache circuit breaker {}",
+                event.getStateTransition()));
+        return new CachingIdempotencyStore(
+                postgres, redis, json, clock, properties.cache().ttl(), breaker, meters);
     }
 }

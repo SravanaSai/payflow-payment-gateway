@@ -30,15 +30,15 @@ public final class PaymentFixtures {
         switch (status) {
             case PENDING -> {
             }
-            case AUTHORIZED -> payment.authorize(CREATED_AT);
+            case AUTHORIZED -> payment.authorize("fixture-psp", CREATED_AT);
             case CAPTURED -> {
-                payment.authorize(CREATED_AT);
+                payment.authorize("fixture-psp", CREATED_AT);
                 payment.capture(inr(PARTIAL_CAPTURE), CREATED_AT);
             }
             case FAILED -> payment.fail("card declined", CREATED_AT);
             case CANCELLED -> payment.cancel("customer request", CREATED_AT);
             case REFUNDED -> {
-                payment.authorize(CREATED_AT);
+                payment.authorize("fixture-psp", CREATED_AT);
                 payment.capture(inr(PARTIAL_CAPTURE), CREATED_AT);
                 payment.refund(CREATED_AT);
             }

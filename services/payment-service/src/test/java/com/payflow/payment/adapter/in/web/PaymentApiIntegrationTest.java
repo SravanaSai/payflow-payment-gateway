@@ -54,7 +54,8 @@ class PaymentApiIntegrationTest extends PostgresTestSupport {
                 .andExpect(jsonPath("$.reference").value("order-1234"));
         mockMvc.perform(post("/v1/payments/{id}/authorize", id).headers(command(merchantId, "TEST")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.status").value("AUTHORIZED"));
+                .andExpect(jsonPath("$.status").value("AUTHORIZED"))
+                .andExpect(jsonPath("$.processorReference").value("mem_" + id));
         mockMvc.perform(post("/v1/payments/{id}/capture", id).headers(command(merchantId, "TEST"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"amountMinor\": 100000}"))

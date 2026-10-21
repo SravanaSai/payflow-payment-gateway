@@ -6,6 +6,7 @@ package com.payflow.common.core.error;
  */
 public enum ErrorCode {
     PAYMENT_NOT_FOUND("Payment does not exist"),
+    PAYMENT_DECLINED("The payment processor declined the request"),
     INVALID_STATE_TRANSITION("Payment cannot transition to the requested state"),
     IDEMPOTENCY_CONFLICT("Idempotency key reused for a different request"),
     IDEMPOTENCY_IN_PROGRESS("A request with this idempotency key is still being processed"),
@@ -18,6 +19,8 @@ public enum ErrorCode {
     FORBIDDEN("You are not allowed to access this resource"),
     RATE_LIMITED("Too many requests"),
     SERVICE_UNAVAILABLE("A required upstream service is unavailable"),
+    PROCESSOR_ERROR("The payment processor returned an unexpected response"),
+    UPSTREAM_TIMEOUT("The upstream service did not respond in time; retry with the same Idempotency-Key"),
     INTERNAL_ERROR("An unexpected error occurred");
 
     private final String defaultMessage;

@@ -56,11 +56,23 @@ class PaymentRepositoryAdapterIntegrationTest extends PostgresTestSupport {
     }
 
     @Test
+    void captureAttemptsSurviveRoundTrip() {
+        PaymentOwner owner = newOwner();
+        Payment authorized = repository.save(inStatus(AUTHORIZED, owner));
+        authorized.recordCaptureDecline(LATER);
+        Payment saved = repository.save(authorized);
+
+        Payment reloaded = repository.findById(saved.getId(), owner).orElseThrow();
+        assertThat(reloaded.getCaptureAttempts()).isEqualTo(1);
+        assertThat(reloaded.getStatus()).isEqualTo(AUTHORIZED);
+    }
+
+    @Test
     void eachUpdateIncrementsTheVersion() {
         PaymentOwner owner = newOwner();
         Payment pending = repository.save(inStatus(PENDING, owner));
 
-        pending.authorize(LATER);
+        pending.authorize("psp-round-trip", LATER);
         Payment authorized = repository.save(pending);
         authorized.capture(LATER);
         Payment captured = repository.save(authorized);

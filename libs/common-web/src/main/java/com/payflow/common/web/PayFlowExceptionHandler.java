@@ -105,6 +105,8 @@ public class PayFlowExceptionHandler extends ResponseEntityExceptionHandler {
             case MERCHANT_NOT_FOUND, PAYMENT_NOT_FOUND, API_KEY_NOT_FOUND -> HttpStatus.NOT_FOUND;
             case IDEMPOTENCY_CONFLICT, IDEMPOTENCY_IN_PROGRESS, CONCURRENT_MODIFICATION -> HttpStatus.CONFLICT;
             case SERVICE_UNAVAILABLE -> HttpStatus.SERVICE_UNAVAILABLE;
+            case PROCESSOR_ERROR -> HttpStatus.BAD_GATEWAY;
+            case UPSTREAM_TIMEOUT -> HttpStatus.GATEWAY_TIMEOUT;
             default -> HttpStatus.UNPROCESSABLE_ENTITY;
         };
     }

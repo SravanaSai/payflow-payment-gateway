@@ -55,7 +55,7 @@ Every `POST` under `/v1/payments` requires an `Idempotency-Key`, scoped to merch
 - A crash between committing a payment and recording its response leaves that key `IN_PROGRESS` until it expires. It is never re-run, which is safe, but the key answers 409 for up to 24 hours.
 - Stored 4xx responses use up their key: a client fixing a rejected request must send it with a new key, and a stored 422 replays even after the payment has changed.
 - Every authenticated request costs one lookup call from the gateway to merchant-service.
-- While Redis is down, every cache call waits up to its 200 ms timeout before falling back to Postgres: one call for a new request, three for a replay (two reads and the attempt to cache the result), measured at about 0.6 s. A circuit breaker around Redis (Phase 3) would remove that cost.
+- While Redis is down, every cache call waits up to its 200 ms timeout before falling back to Postgres until the idempotency-cache circuit breaker opens; see ADR-0005.
 - Anonymous callers get 401 rather than 404 for unknown `/v1` paths.
 
 ### Operational

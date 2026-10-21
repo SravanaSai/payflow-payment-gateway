@@ -84,9 +84,10 @@ class PaymentTest {
         void movesPendingToAuthorized() {
             Payment payment = inStatus(PENDING);
 
-            payment.authorize(LATER);
+            payment.authorize("psp-ref-1", LATER);
 
             assertThat(payment.getStatus()).isEqualTo(AUTHORIZED);
+            assertThat(payment.getProcessorReference()).isEqualTo("psp-ref-1");
             assertThat(payment.getUpdatedAt()).isEqualTo(LATER);
             assertThat(payment.getCreatedAt()).isEqualTo(CREATED_AT);
         }
@@ -95,7 +96,22 @@ class PaymentTest {
         void cannotAuthorizeTwice() {
             Payment payment = inStatus(AUTHORIZED);
 
-            assertRejectedUnchanged(payment, () -> payment.authorize(LATER), INVALID_STATE_TRANSITION);
+            assertRejectedUnchanged(payment, () -> payment.authorize("psp-ref-1", LATER), INVALID_STATE_TRANSITION);
+        }
+
+        @Test
+        void rejectsBlankProcessorReference() {
+            Payment payment = inStatus(PENDING);
+
+            assertRejected(() -> payment.authorize("  ", LATER), VALIDATION_FAILED);
+        }
+
+        @Test
+        void rejectsProcessorReferenceOverTheLimit() {
+            Payment payment = inStatus(PENDING);
+            String over = "r".repeat(Payment.MAX_PROCESSOR_REFERENCE_LENGTH + 1);
+
+            assertRejected(() -> payment.authorize(over, LATER), VALIDATION_FAILED);
         }
     }
 
@@ -150,6 +166,25 @@ class PaymentTest {
 
             assertRejectedUnchanged(payment, () -> payment.capture(inr(AMOUNT * 100), LATER),
                     INVALID_STATE_TRANSITION);
+        }
+
+        @Test
+        void recordCaptureDeclineCountsAttemptAndStaysAuthorized() {
+            Payment payment = inStatus(AUTHORIZED);
+
+            payment.recordCaptureDecline(LATER);
+
+            assertThat(payment.getStatus()).isEqualTo(AUTHORIZED);
+            assertThat(payment.getCaptureAttempts()).isEqualTo(1);
+            assertThat(payment.getUpdatedAt()).isEqualTo(LATER);
+        }
+
+        @Test
+        void recordCaptureDeclineRejectedUnlessAuthorized() {
+            Payment pending = inStatus(PENDING);
+            assertRejectedUnchanged(pending, () -> pending.recordCaptureDecline(LATER), INVALID_STATE_TRANSITION);
+            Payment captured = inStatus(CAPTURED);
+            assertRejectedUnchanged(captured, () -> captured.recordCaptureDecline(LATER), INVALID_STATE_TRANSITION);
         }
     }
 
@@ -240,7 +275,7 @@ class PaymentTest {
     void terminalPaymentsRejectEveryCommand(PaymentStatus terminal) {
         Payment payment = inStatus(terminal);
 
-        assertRejectedUnchanged(payment, () -> payment.authorize(LATER), INVALID_STATE_TRANSITION);
+        assertRejectedUnchanged(payment, () -> payment.authorize("psp-ref-1", LATER), INVALID_STATE_TRANSITION);
         assertRejectedUnchanged(payment, () -> payment.capture(LATER), INVALID_STATE_TRANSITION);
         assertRejectedUnchanged(payment, () -> payment.cancel(null, LATER), INVALID_STATE_TRANSITION);
         assertRejectedUnchanged(payment, () -> payment.fail("late decline", LATER), INVALID_STATE_TRANSITION);
@@ -264,7 +299,7 @@ class PaymentTest {
 
         private Payment capturedWith(Money captured) {
             return Payment.rehydrate(PaymentId.generate(), newOwner(), inr(AMOUNT), captured, CAPTURED,
-                    null, null, null, null, 1L, CREATED_AT, CREATED_AT);
+                    null, null, null, null, null, 0, 1L, CREATED_AT, CREATED_AT);
         }
     }
 
@@ -276,7 +311,7 @@ class PaymentTest {
             Payment original = inStatus(PENDING);
             Payment sameIdElsewhereInTime = Payment.rehydrate(original.getId(), original.getOwner(),
                     original.getAmount(), original.getAmount(), CAPTURED,
-                    null, null, null, null, 3L, CREATED_AT, LATER);
+                    null, null, null, null, "psp-ref", 0, 3L, CREATED_AT, LATER);
 
             assertThat(sameIdElsewhereInTime).isEqualTo(original).hasSameHashCodeAs(original);
             assertThat(inStatus(PENDING)).isNotEqualTo(original);

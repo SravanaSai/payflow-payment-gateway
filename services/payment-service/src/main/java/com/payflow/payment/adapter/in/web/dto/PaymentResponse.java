@@ -20,6 +20,7 @@ public record PaymentResponse(
         String reference,
         String failureReason,
         String cancellationReason,
+        String processorReference,
         Instant createdAt,
         Instant updatedAt) {
 
@@ -35,6 +36,7 @@ public record PaymentResponse(
                 payment.getReference(),
                 payment.getFailureReason(),
                 payment.getCancellationReason(),
+                payment.getProcessorReference(),
                 payment.getCreatedAt(),
                 payment.getUpdatedAt());
     }

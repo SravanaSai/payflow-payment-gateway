@@ -58,6 +58,8 @@ class PaymentRepositoryAdapter implements PaymentRepositoryPort {
                 payment.getReference(),
                 payment.getFailureReason(),
                 payment.getCancellationReason(),
+                payment.getProcessorReference(),
+                payment.getCaptureAttempts(),
                 payment.getVersion(),
                 payment.getCreatedAt(),
                 payment.getUpdatedAt());
@@ -74,6 +76,8 @@ class PaymentRepositoryAdapter implements PaymentRepositoryPort {
                 entity.getReference(),
                 entity.getFailureReason(),
                 entity.getCancellationReason(),
+                entity.getProcessorReference(),
+                entity.getCaptureAttempts(),
                 entity.getVersion(),
                 entity.getCreatedAt(),
                 entity.getUpdatedAt());

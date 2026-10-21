@@ -23,6 +23,7 @@
         <module>libs/common-web</module>
         <module>services/merchant-service</module>
         <module>services/payment-service</module>
+        <module>services/mock-psp</module>
         <module>services/edge-gateway</module>
     </modules>
 

@@ -21,6 +21,7 @@ public final class Payment {
     public static final int MAX_DESCRIPTION_LENGTH = 500;
     public static final int MAX_REFERENCE_LENGTH = 128;
     public static final int MAX_REASON_LENGTH = 255;
+    public static final int MAX_PROCESSOR_REFERENCE_LENGTH = 128;
 
     private final PaymentId id;
     private final PaymentOwner owner;
@@ -33,6 +34,8 @@ public final class Payment {
     private PaymentStatus status;
     private String failureReason;
     private String cancellationReason;
+    private String processorReference;
+    private int captureAttempts;
     private Instant updatedAt;
 
     private Payment(
@@ -45,6 +48,8 @@ public final class Payment {
             String reference,
             String failureReason,
             String cancellationReason,
+            String processorReference,
+            int captureAttempts,
             Long version,
             Instant createdAt,
             Instant updatedAt) {
@@ -57,6 +62,8 @@ public final class Payment {
         this.reference = reference;
         this.failureReason = failureReason;
         this.cancellationReason = cancellationReason;
+        this.processorReference = processorReference;
+        this.captureAttempts = captureAttempts;
         this.version = version;
         this.createdAt = Objects.requireNonNull(createdAt, "createdAt must not be null");
         this.updatedAt = Objects.requireNonNull(updatedAt, "updatedAt must not be null");
@@ -90,6 +97,8 @@ public final class Payment {
                 null,
                 null,
                 null,
+                0,
+                null,
                 now,
                 now);
     }
@@ -108,15 +117,31 @@ public final class Payment {
             String reference,
             String failureReason,
             String cancellationReason,
+            String processorReference,
+            int captureAttempts,
             Long version,
             Instant createdAt,
             Instant updatedAt) {
         return new Payment(id, owner, amount, capturedAmount, status, description, reference,
-                failureReason, cancellationReason, version, createdAt, updatedAt);
+                failureReason, cancellationReason, processorReference, captureAttempts, version, createdAt, updatedAt);
     }
 
-    public void authorize(Instant now) {
+    /** Validates without mutating; used before an outbound processor call. */
+    public void checkAuthorizable() {
+        ensureCanTransitionTo(PaymentStatus.AUTHORIZED);
+    }
+
+    /** Validates capture amount and state without mutating; used before an outbound processor call. */
+    public void checkCapturable(Money requested) {
+        ensureCanTransitionTo(PaymentStatus.CAPTURED);
+        requireCapturable(requested);
+    }
+
+    public void authorize(String processorReference, Instant now) {
+        ensureCanTransitionTo(PaymentStatus.AUTHORIZED);
+        String normalized = requiredText(processorReference, "processor reference", MAX_PROCESSOR_REFERENCE_LENGTH);
         transitionTo(PaymentStatus.AUTHORIZED, now);
+        this.processorReference = normalized;
     }
 
     public void capture(Instant now) {
@@ -128,6 +153,16 @@ public final class Payment {
         requireCapturable(requested);
         transitionTo(PaymentStatus.CAPTURED, now);
         this.capturedAmount = requested;
+    }
+
+    /**
+     * Records a definite processor decline for a capture attempt without leaving AUTHORIZED.
+     * The next capture uses a new outbound idempotency key ({@code :capture:N}).
+     */
+    public void recordCaptureDecline(Instant now) {
+        ensureCanTransitionTo(PaymentStatus.CAPTURED);
+        captureAttempts++;
+        this.updatedAt = Objects.requireNonNull(now, "now must not be null");
     }
 
     public void cancel(String reason, Instant now) {
@@ -183,6 +218,14 @@ public final class Payment {
 
     public String getCancellationReason() {
         return cancellationReason;
+    }
+
+    public String getProcessorReference() {
+        return processorReference;
+    }
+
+    public int getCaptureAttempts() {
+        return captureAttempts;
     }
 
     /** Concurrency token; {@code null} until the payment is first persisted. */

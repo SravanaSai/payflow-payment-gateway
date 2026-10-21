@@ -6,11 +6,14 @@ import com.payflow.payment.domain.model.PaymentEnvironment;
 import com.payflow.payment.domain.model.PaymentOwner;
 import com.payflow.payment.idempotency.IdempotencyRecord.Status;
 import com.payflow.payment.idempotency.IdempotencyRecord.StoredResponse;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.SocketOptions;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.connection.RedisStandaloneConfiguration;
 import org.springframework.data.redis.connection.lettuce.LettuceClientConfiguration;
@@ -59,6 +62,13 @@ class CachingIdempotencyStoreTest {
     @AfterAll
     static void disconnect() {
         liveConnection.destroy();
+    }
+
+    @BeforeEach
+    void flushRedis() {
+        liveRedis.getConnectionFactory().getConnection().serverCommands().flushDb();
+        postgres.reset();
+        meters.clear();
     }
 
     @Test
@@ -115,6 +125,64 @@ class CachingIdempotencyStoreTest {
     }
 
     @Test
+    void aBlackHoleRedisOpensTheBreakerAndLaterCallsSkipIt() throws Exception {
+        postgres.put(key, completed(NOW.plus(Duration.ofHours(24))));
+        try (ServerSocket blackHole = new ServerSocket(0)) {
+            LettuceConnectionFactory hanging = connectionTo("127.0.0.1", blackHole.getLocalPort());
+            CircuitBreaker breaker = testBreaker();
+            CachingIdempotencyStore cache = cacheOver(new StringRedisTemplate(hanging), breaker);
+            try {
+                for (int i = 0; i < 4; i++) {
+                    cache.find(key);
+                }
+                assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.OPEN);
+
+                long start = System.nanoTime();
+                assertThat(cache.find(key)).isPresent();
+                long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+                assertThat(elapsedMs).isLessThan(20);
+                assertThat(count("skipped")).isGreaterThanOrEqualTo(1);
+            } finally {
+                hanging.destroy();
+            }
+        }
+    }
+
+    @Test
+    void aCorruptCacheEntryDoesNotOpenTheBreaker() {
+        postgres.put(key, completed(NOW.plus(Duration.ofHours(24))));
+        CircuitBreaker breaker = testBreaker();
+        CachingIdempotencyStore cache = cacheOver(liveRedis, breaker);
+
+        for (int i = 0; i < 10; i++) {
+            liveRedis.opsForValue().set(CachingIdempotencyStore.redisKey(key), "{not-json");
+            assertThat(cache.find(key)).isPresent();
+        }
+
+        assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.CLOSED);
+        assertThat(count("error")).isGreaterThanOrEqualTo(10);
+    }
+
+    @Test
+    void anOpenBreakerRecoversWhenRedisAnswers() throws InterruptedException {
+        postgres.put(key, completed(NOW.plus(Duration.ofHours(24))));
+        CircuitBreaker breaker = recoveryTestBreaker();
+        CachingIdempotencyStore cache = cacheOver(liveRedis, breaker);
+
+        cache.find(key);
+        breaker.transitionToOpenState();
+        assertThat(cache.find(key)).isPresent();
+        assertThat(count("skipped")).isGreaterThanOrEqualTo(1);
+
+        Thread.sleep(150);
+        for (int i = 0; i < 5 && breaker.getState() != CircuitBreaker.State.CLOSED; i++) {
+            cache.find(key);
+        }
+        assertThat(breaker.getState()).isEqualTo(CircuitBreaker.State.CLOSED);
+        assertThat(count("hit")).isGreaterThanOrEqualTo(1);
+    }
+
+    @Test
     void aRedisOutageFallsBackToPostgres() throws IOException {
         LettuceConnectionFactory dead = connectionTo("127.0.0.1", closedPort());
         try {
@@ -132,8 +200,38 @@ class CachingIdempotencyStoreTest {
     }
 
     private CachingIdempotencyStore cacheOver(StringRedisTemplate redis) {
+        return cacheOver(redis, testBreaker());
+    }
+
+    private CachingIdempotencyStore cacheOver(StringRedisTemplate redis, CircuitBreaker breaker) {
         return new CachingIdempotencyStore(postgres, redis, JsonMapper.builder().build(),
-                Clock.fixed(NOW, ZoneOffset.UTC), MAX_TTL, meters);
+                Clock.fixed(NOW, ZoneOffset.UTC), MAX_TTL, breaker, meters);
+    }
+
+    private static CircuitBreaker testBreaker() {
+        CircuitBreakerConfig config = CircuitBreakerConfig.custom()
+                .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
+                .slidingWindowSize(4)
+                .minimumNumberOfCalls(4)
+                .failureRateThreshold(50)
+                .waitDurationInOpenState(Duration.ofMillis(100))
+                .permittedNumberOfCallsInHalfOpenState(3)
+                .automaticTransitionFromOpenToHalfOpenEnabled(false)
+                .build();
+        return CircuitBreaker.of("test-idempotency-cache", config);
+    }
+
+    private static CircuitBreaker recoveryTestBreaker() {
+        CircuitBreakerConfig config = CircuitBreakerConfig.custom()
+                .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
+                .slidingWindowSize(4)
+                .minimumNumberOfCalls(4)
+                .failureRateThreshold(50)
+                .waitDurationInOpenState(Duration.ofMillis(100))
+                .permittedNumberOfCallsInHalfOpenState(3)
+                .automaticTransitionFromOpenToHalfOpenEnabled(true)
+                .build();
+        return CircuitBreaker.of("test-idempotency-cache-recovery", config);
     }
 
     private long ttlMillis() {
@@ -177,6 +275,12 @@ class CachingIdempotencyStoreTest {
 
         void put(IdempotencyKey key, IdempotencyRecord record) {
             records.put(key, record);
+        }
+
+        void reset() {
+            records.clear();
+            claims = 0;
+            finds = 0;
         }
 
         @Override

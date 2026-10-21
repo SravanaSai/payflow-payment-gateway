@@ -41,8 +41,17 @@ management:
   health:
     redis:
       enabled: false
+    circuitbreakers:
+      enabled: false
 
 payflow:
+  processor:
+    type: in-memory
+    http:
+      base-url: ${PAYFLOW_PSP_BASE_URL:http://localhost:8083}
+      api-key: ${PAYFLOW_PSP_API_KEY:mock_psp_local_key}
+      connect-timeout: 250ms
+      read-timeout: 1s
   openapi:
     title: PayFlow Payment API
     description: Payment lifecycle — create, authorize, capture, cancel
@@ -60,6 +69,44 @@ payflow:
 springdoc:
   api-docs:
     path: /v3/api-docs
+
+resilience4j:
+  retry:
+    instances:
+      psp:
+        max-attempts: 3
+        wait-duration: 100ms
+        enable-exponential-backoff: true
+        exponential-backoff-multiplier: 2
+        enable-randomized-wait: true
+        randomized-wait-factor: 0.5
+  circuitbreaker:
+    instances:
+      psp:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 2
+        automatic-transition-from-open-to-half-open-enabled: false
+        register-health-indicator: false
+      idempotency-cache:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        slow-call-duration-threshold: 100ms
+        slow-call-rate-threshold: 80
+        wait-duration-in-open-state: 5s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: false
+        register-health-indicator: false
+  bulkhead:
+    instances:
+      psp:
+        max-concurrent-calls: 20
+        max-wait-duration: 0
 
 logging:
   level:

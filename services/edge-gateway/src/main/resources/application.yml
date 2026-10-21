@@ -6,6 +6,8 @@ spring:
     virtual:
       enabled: true
 
+  # Shared by merchant lookup RestClient and the payment/merchant proxy (GatewayHttpClientConfig).
+  # read-timeout must stay above payment-service's worst-case PSP budget (~4.2s).
   http:
     clients:
       connect-timeout: 2s
@@ -46,6 +48,23 @@ management:
   health:
     redis:
       enabled: false
+    circuitbreakers:
+      enabled: false
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      rate-limit-redis:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 20
+        minimum-number-of-calls: 10
+        failure-rate-threshold: 50
+        slow-call-duration-threshold: 100ms
+        slow-call-rate-threshold: 80
+        wait-duration-in-open-state: 5s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: false
+        register-health-indicator: false
 
 payflow:
   gateway:

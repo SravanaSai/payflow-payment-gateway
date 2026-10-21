@@ -45,7 +45,7 @@ Default to `HttpServletRequest.getRemoteAddr()`. Read `X-Forwarded-For` only whe
 
 ### Negative
 
-- Two Redis round trips per authenticated request (+200–400 ms worst case if Redis is slow; mitigated by 200 ms timeout and fail-open).
+- Two Redis round trips per authenticated request (+200–400 ms worst case if Redis is slow until the rate-limit-redis circuit breaker opens; see ADR-0005).
 - NAT/shared IP addresses share the anonymous bucket (mitigated by generous anonymous tier).
 - Distributed botnets with many IPs are not fully stopped by IP limiting alone (merchant tier + future WAF).
 

@@ -2,6 +2,8 @@ package com.payflow.payment.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -15,5 +17,17 @@ public class PaymentServiceConfig {
     @Bean
     public Clock clock() {
         return Clock.tick(Clock.systemUTC(), Duration.of(1, ChronoUnit.MICROS));
+    }
+
+    @Bean
+    TransactionTemplate readOnlyTransactionTemplate(PlatformTransactionManager transactionManager) {
+        TransactionTemplate template = new TransactionTemplate(transactionManager);
+        template.setReadOnly(true);
+        return template;
+    }
+
+    @Bean
+    TransactionTemplate writeTransactionTemplate(PlatformTransactionManager transactionManager) {
+        return new TransactionTemplate(transactionManager);
     }
 }

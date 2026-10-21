@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: mock-psp
+
+  # Virtual threads make the "slow" scenario cheap: a waiting request does not hold a platform thread.
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: 8083
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+
+mockpsp:
+  # Local development default. Deliberately not shaped like a real secret key (no sk_ prefix).
+  api-key: mock_psp_local_key
+  slow-delay: 5s
+  flaky-failures: 2
+
+logging:
+  level:
+    root: INFO
+    com.payflow: DEBUG
